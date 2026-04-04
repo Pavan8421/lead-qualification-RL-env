@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-lead-triage-env"
+version = "0.1.0"
+description = "Lead triage environment for OpenEnv (sales CRM simulation)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core[core]>=0.2.2",
+    "fastapi>=0.115.0",
+    "pydantic>=2.0.0",
+    "uvicorn[standard]>=0.24.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+server = "lead_triage_env.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["lead_triage_env", "lead_triage_env.server"]
+package-dir = { "lead_triage_env" = ".", "lead_triage_env.server" = "server" }
