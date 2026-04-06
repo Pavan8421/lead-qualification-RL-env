@@ -1,3 +1,11 @@
+---
+title: lead_triage_env
+sdk: docker
+app_port: 8000
+colorFrom: blue
+colorTo: green
+---
+
 # Lead Triage Environment (OpenEnv)
 
 **Phase 2:** tiered **easy / medium / hard** tasks, **latent lead quality** (server-only), **stochastic transitions**, **shaped rewards**, **repeat / invalid-action penalties**, and a deterministic **grader** in \([0,1]\) on terminal steps (`metadata["grader_score"]`).
