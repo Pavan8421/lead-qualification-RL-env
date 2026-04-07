@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from .task_tier import TaskTier, TIER_CONFIGS
 
+EPS = 1e-4
+
 
 @dataclass
 class EpisodeGradeInput:
@@ -22,8 +24,9 @@ class EpisodeGradeInput:
     repeat_action_streak_max: int
 
 
-def _clamp01(x: float) -> float:
-    return max(0.0, min(1.0, x))
+def _clamp_open01(x: float) -> float:
+    """Clamp to strict open interval (0,1) for validator compatibility."""
+    return max(EPS, min(1.0 - EPS, x))
 
 
 def grade_episode(summary: EpisodeGradeInput) -> float:
@@ -34,7 +37,7 @@ def grade_episode(summary: EpisodeGradeInput) -> float:
     oracle = cfg.grader_oracle_return
     rnd = cfg.grader_random_return
     span = max(1e-6, oracle - rnd)
-    return_component = _clamp01((summary.total_reward - rnd) / span)
+    return_component = _clamp_open01((summary.total_reward - rnd) / span)
 
     heuristic = 0.35
     if summary.converted:
@@ -47,10 +50,11 @@ def grade_episode(summary: EpisodeGradeInput) -> float:
         heuristic -= 0.1
     if summary.steps_taken >= summary.max_steps and not summary.converted:
         heuristic -= 0.08
-    heuristic = _clamp01(heuristic)
+    heuristic = _clamp_open01(heuristic)
 
-    score = _clamp01(0.62 * return_component + 0.38 * heuristic)
-    return round(score, 4)
+    score = _clamp_open01(0.62 * return_component + 0.38 * heuristic)
+    # Re-clamp after rounding so we never emit 0.0 or 1.0.
+    return _clamp_open01(round(score, 4))
 
 
 def grade_episode_from_log(episode_log: List[Dict[str, Any]], tier: TaskTier) -> float:
