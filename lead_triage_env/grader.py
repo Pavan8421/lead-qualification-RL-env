@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from .task_tier import TaskTier, TIER_CONFIGS
 
-EPS = 1e-4
+EPS = 1e-2
 
 
 @dataclass
