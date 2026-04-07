@@ -12,7 +12,7 @@ Defaults are applied ONLY for API_BASE_URL and MODEL_NAME.
 STDOUT must emit only:
     [START] task=<task_name> env=<benchmark> model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from lead_triage_env import LeadTriageAction, LeadTriageEnv, grade_episode_from_
 
 TIERS: List[str] = ["easy", "medium", "hard"]
 ALL_ACTIONS: List[str] = ["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"]
+EPS = 1e-2
 
 
 def _load_dotenv_if_present() -> None:
@@ -55,6 +56,10 @@ def _safe_float(value: object, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _clamp_open01(x: float) -> float:
+    return max(EPS, min(1.0 - EPS, x))
 
 
 def _extract_grader_score(
@@ -81,7 +86,7 @@ def _extract_grader_score(
                 return _safe_float(grade_episode_from_log(traj, tier), 0.0)
             except Exception:
                 return 0.0
-    return 0.0
+    return EPS
 
 
 def _observation_error(obs: object) -> Optional[str]:
@@ -126,10 +131,11 @@ def log_step(
     )
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -180,14 +186,16 @@ async def run_episode(
     benchmark: str,
     tier: str,
     seed: int,
-    all_rewards: List[float],
-) -> None:
+    ) -> None:
     log_start(task=task_name, env_name=benchmark, model=model_name)
 
     reset_result = await env.reset(seed=seed, task_tier=tier)
     obs = reset_result.observation
     done = bool(reset_result.done)
     step_n = 0
+    rewards: List[float] = []
+    final_score = EPS
+    episode_success = True
 
     while not done:
         step_n += 1
@@ -199,10 +207,12 @@ async def run_episode(
         obs = step_result.observation
         done = bool(step_result.done)
         reward = _safe_float(step_result.reward)
-        all_rewards.append(reward)
+        rewards.append(reward)
 
         env_err = _observation_error(obs)
         err_out = env_err if env_err is not None else llm_err
+        if err_out is not None:
+            episode_success = False
 
         log_step(
             step=step_n,
@@ -212,10 +222,24 @@ async def run_episode(
             error=err_out,
         )
 
+        if done:
+            final_score = _extract_grader_score(
+                getattr(obs, "grader_score", None),
+                getattr(obs, "trajectory", None),
+                getattr(obs, "metadata", None),
+                tier,
+            )
+            final_score = _clamp_open01(final_score)
+
+    log_end(
+        success=episode_success and (final_score > 0.0 and final_score < 1.0),
+        steps=step_n,
+        score=final_score,
+        rewards=rewards,
+    )
+
 
 async def _async_main() -> None:
-    all_rewards: List[float] = []
-    success = False
     env: Optional[LeadTriageEnv] = None
 
     try:
@@ -225,7 +249,8 @@ async def _async_main() -> None:
         MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
         api_key = (
             os.getenv("OPENAI_API_KEY", "").strip()
-            or os.getenv("API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
+            or os.getenv("HF_TOKEN", "").strip()
+            or os.getenv("API_KEY", "").strip()
         )
         if not api_key:
             raise RuntimeError(
@@ -262,14 +287,10 @@ async def _async_main() -> None:
                     benchmark,
                     tier,
                     seed,
-                    all_rewards,
                 )
-        success = True
     except Exception as exc:
         print(f"[DEBUG] inference failed: {exc}", file=sys.stderr, flush=True)
-        success = False
     finally:
-        steps_total = len(all_rewards)
         if env is not None:
             try:
                 await env.close()
@@ -279,7 +300,6 @@ async def _async_main() -> None:
                     file=sys.stderr,
                     flush=True,
                 )
-        log_end(success=success, steps=steps_total, rewards=all_rewards)
 
 
 def main() -> None:
