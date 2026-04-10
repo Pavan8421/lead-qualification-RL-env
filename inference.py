@@ -106,6 +106,62 @@ def _extract_action(raw: str, legal_actions: List[str]) -> str:
     return "EMAIL" if "EMAIL" in legal_actions else legal_actions[0]
 
 
+def _rule_policy_action(observation: Dict[str, object], legal_actions: List[str]) -> str:
+    """Deterministic fallback policy tuned for lead triage structure."""
+    intent = _safe_float(observation.get("intent_score"), _safe_float(observation.get("engagement_score"), 0.5))
+    attempts = int(_safe_float(observation.get("contact_attempts"), 0))
+    step_index = int(_safe_float(observation.get("step_index"), 0))
+    max_steps = int(_safe_float(observation.get("max_steps"), 4))
+    has_prior = bool(observation.get("has_prior_contact", False))
+    urgency = str(observation.get("urgency_level", "medium")).lower()
+    deal_value = _safe_float(observation.get("estimated_deal_value"), 0.0)
+
+    if "IGNORE" in legal_actions and attempts >= 3 and intent < 0.25:
+        return "IGNORE"
+
+    if not has_prior:
+        if "CALL" in legal_actions and (intent >= 0.75 or urgency == "high" or deal_value >= 20000.0):
+            return "CALL"
+        if "EMAIL" in legal_actions:
+            return "EMAIL"
+    else:
+        if "FOLLOW_UP" in legal_actions and (intent >= 0.55 or step_index >= max_steps - 1):
+            return "FOLLOW_UP"
+        if intent >= 0.65 and "CALL" in legal_actions:
+            return "CALL"
+        if "EMAIL" in legal_actions:
+            return "EMAIL"
+
+    return legal_actions[0]
+
+
+def _select_final_action(
+    llm_action: str,
+    observation: Dict[str, object],
+    legal_actions: List[str],
+) -> str:
+    """Use LLM action with guardrails; fallback to deterministic rule policy."""
+    if llm_action not in legal_actions:
+        return _rule_policy_action(observation, legal_actions)
+
+    intent = _safe_float(observation.get("intent_score"), _safe_float(observation.get("engagement_score"), 0.5))
+    attempts = int(_safe_float(observation.get("contact_attempts"), 0))
+    has_prior = bool(observation.get("has_prior_contact", False))
+
+    # Avoid repeatedly expensive outreach on clearly weak leads.
+    if llm_action == "CALL" and intent < 0.3 and attempts >= 1:
+        if "EMAIL" in legal_actions:
+            return "EMAIL"
+        if "IGNORE" in legal_actions:
+            return "IGNORE"
+
+    # Prefer FOLLOW_UP once contact exists and signal is decent.
+    if has_prior and intent >= 0.55 and "FOLLOW_UP" in legal_actions and llm_action in ("CALL", "EMAIL"):
+        return "FOLLOW_UP"
+
+    return llm_action
+
+
 def log_start(task: str, env_name: str, model: str) -> None:
     print(
         f"[START] task={task} env={env_name} model={model}",
@@ -172,9 +228,10 @@ def choose_action(
             ],
         )
         content = completion.choices[0].message.content or ""
-        return _extract_action(content, legal_actions), None
+        llm_action = _extract_action(content, legal_actions)
+        return _select_final_action(llm_action, observation, legal_actions), None
     except Exception as exc:
-        fallback = "EMAIL" if "EMAIL" in legal_actions else legal_actions[0]
+        fallback = _rule_policy_action(observation, legal_actions)
         return fallback, str(exc)
 
 
