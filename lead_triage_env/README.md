@@ -145,10 +145,3 @@ Then run inference from repo root.
 - Space URL: `https://pavanKumar2004-lead-triage-env.hf.space`
 - Health endpoint: `https://pavanKumar2004-lead-triage-env.hf.space/health`
 
-## Pre-submit checklist
-
-- `openenv validate` passes
-- Docker build + run pass
-- HF Space is live (`/health`, `/reset`)
-- Baseline inference runs successfully and logs strict format
-- Task scores remain strictly within `(0,1)`
