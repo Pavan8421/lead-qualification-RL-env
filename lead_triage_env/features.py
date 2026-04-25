@@ -28,6 +28,44 @@ def _sample_urgency(quality: LeadQuality, tier: TierConfig, rng: random.Random) 
     return "medium"
 
 
+_SOURCE_INTENT_BIAS: Dict[str, float] = {
+    "linkedin": 0.05,
+    "webform": 0.10,
+    "referral": 0.20,
+    "event": 0.15,
+}
+
+
+def derive_intent_estimate(
+    engagement_score: float,
+    source: str,
+    rng: random.Random,
+) -> str:
+    """Coarse pre-contact intent bucket from engagement + source, with light noise.
+
+    Returns one of: 'low', 'medium', 'high', 'unknown'.
+    Used by env_version=v2 to mask `intent_score` until first CALL/EMAIL.
+    """
+    bias = _SOURCE_INTENT_BIAS.get(source, 0.0)
+    score = 0.7 * float(engagement_score) + 0.3 * bias
+    if rng.random() < 0.10:
+        return rng.choice(["low", "medium", "high", "unknown"])
+    if score < 0.33:
+        return "low"
+    if score < 0.66:
+        return "medium"
+    return "high"
+
+
+def bucket_intent_score(intent_score: float) -> str:
+    """Deterministic post-contact bucket of `intent_score`."""
+    if intent_score < 0.33:
+        return "low"
+    if intent_score < 0.66:
+        return "medium"
+    return "high"
+
+
 def sample_latent_quality(tier: TierConfig, rng: random.Random) -> LeadQuality:
     """Tier shifts prior over lead quality (easy → more highs)."""
     if tier.name == "easy":

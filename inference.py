@@ -23,7 +23,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -32,6 +32,12 @@ from lead_triage_env import LeadTriageAction, LeadTriageEnv, grade_episode_from_
 
 TIERS: List[str] = ["easy", "medium", "hard"]
 ALL_ACTIONS: List[str] = ["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"]
+DEFAULT_ARG_BY_CHANNEL: Dict[str, str] = {
+    "EMAIL": "generic",
+    "CALL": "discovery",
+    "FOLLOW_UP": "email:soft",
+    "IGNORE": "",
+}
 EPS = 1e-2
 
 
@@ -101,14 +107,86 @@ def _observation_error(obs: object) -> Optional[str]:
 def _extract_action(raw: str, legal_actions: List[str]) -> str:
     txt = (raw or "").upper()
     for act in legal_actions:
-        if re.search(rf"\b{re.escape(act)}\b", txt):
+        if act.upper() in txt:
             return act
     return "EMAIL" if "EMAIL" in legal_actions else legal_actions[0]
 
 
+def _flatten_legal_tokens(
+    legal_action_map: Dict[str, List[str]] | None,
+    legal_actions: List[str],
+) -> List[str]:
+    if not legal_action_map:
+        return list(legal_actions)
+    tokens: List[str] = []
+    for channel, args in legal_action_map.items():
+        if channel == "IGNORE":
+            tokens.append("IGNORE")
+            continue
+        for arg in args:
+            tokens.append(f"{channel}({arg})")
+    return tokens
+
+
+def _parse_action_token(token: str) -> Tuple[str, str]:
+    txt = token.strip()
+    m = re.match(r"^([A-Z_]+)\(([^)]+)\)$", txt)
+    if m:
+        return m.group(1), m.group(2)
+    return txt, DEFAULT_ARG_BY_CHANNEL.get(txt, "")
+
+
+def _build_action_payload(channel: str, argument: str) -> Dict[str, object]:
+    payload: Dict[str, object] = {"channel": channel}
+    if channel == "EMAIL":
+        payload["template"] = argument or "generic"
+    elif channel == "CALL":
+        payload["script"] = argument or "discovery"
+    elif channel == "FOLLOW_UP":
+        left, _, right = (argument or "email:soft").partition(":")
+        payload["follow_up_channel"] = left or "email"
+        payload["follow_up_tone"] = right or "soft"
+    return payload
+
+
+_INTENT_ESTIMATE_TO_SCORE: Dict[str, float] = {
+    "low": 0.20,
+    "medium": 0.50,
+    "high": 0.80,
+    "unknown": 0.50,
+}
+
+
+def _effective_intent(observation: Dict[str, object]) -> float:
+    """Use intent_score if exposed; fall back to intent_estimate when env masks it (v2)."""
+    raw = _safe_float(observation.get("intent_score"), -1.0)
+    has_prior = bool(observation.get("has_prior_contact", False))
+    if raw > 0.0 or has_prior:
+        return max(0.0, raw) if raw >= 0.0 else _safe_float(observation.get("engagement_score"), 0.5)
+    estimate = str(observation.get("intent_estimate", "unknown")).lower()
+    if estimate in _INTENT_ESTIMATE_TO_SCORE:
+        base = _INTENT_ESTIMATE_TO_SCORE[estimate]
+    else:
+        base = _safe_float(observation.get("engagement_score"), 0.5)
+
+    history_summary = observation.get("history_summary")
+    if isinstance(history_summary, dict):
+        inbound_count = int(_safe_float(history_summary.get("inbound_count"), 0))
+        last_inbound_sentiment = _safe_float(
+            history_summary.get("last_inbound_sentiment"), 0.0
+        )
+        silence_gap = int(_safe_float(history_summary.get("longest_silence_gap"), 0))
+        # Keep rule baseline simple: a tiny adjustment from history_summary scalars only.
+        base += min(0.08, inbound_count * 0.015)
+        base += 0.08 * max(-1.0, min(1.0, last_inbound_sentiment))
+        if silence_gap >= 12:
+            base -= 0.06
+    return max(0.0, min(1.0, base))
+
+
 def _rule_policy_action(observation: Dict[str, object], legal_actions: List[str]) -> str:
     """Deterministic fallback policy tuned for lead triage structure."""
-    intent = _safe_float(observation.get("intent_score"), _safe_float(observation.get("engagement_score"), 0.5))
+    intent = _effective_intent(observation)
     attempts = int(_safe_float(observation.get("contact_attempts"), 0))
     step_index = int(_safe_float(observation.get("step_index"), 0))
     max_steps = int(_safe_float(observation.get("max_steps"), 4))
@@ -144,7 +222,7 @@ def _select_final_action(
     if llm_action not in legal_actions:
         return _rule_policy_action(observation, legal_actions)
 
-    intent = _safe_float(observation.get("intent_score"), _safe_float(observation.get("engagement_score"), 0.5))
+    intent = _effective_intent(observation)
     attempts = int(_safe_float(observation.get("contact_attempts"), 0))
     has_prior = bool(observation.get("has_prior_contact", False))
 
@@ -201,10 +279,12 @@ def choose_action(
     model_name: str,
     observation: Dict[str, object],
     legal_actions: List[str],
-) -> tuple[str, Optional[str]]:
+    legal_action_map: Dict[str, List[str]] | None = None,
+) -> tuple[Dict[str, object], str, Optional[str]]:
+    legal_tokens = _flatten_legal_tokens(legal_action_map, legal_actions)
     prompt_payload = {
         "observation": observation,
-        "legal_actions": legal_actions,
+        "legal_actions": legal_tokens,
         "instruction": "Return exactly one action token from legal_actions.",
     }
     try:
@@ -217,7 +297,8 @@ def choose_action(
                     "role": "system",
                     "content": (
                         "You are a lead triage policy. "
-                        "Reply with exactly one token: CALL, EMAIL, FOLLOW_UP, or IGNORE. "
+                        "Reply with exactly one token from legal_actions; if arguments are present, "
+                        "reply as CHANNEL(argument). "
                         "Use only a legal action."
                     ),
                 },
@@ -228,11 +309,32 @@ def choose_action(
             ],
         )
         content = completion.choices[0].message.content or ""
-        llm_action = _extract_action(content, legal_actions)
-        return _select_final_action(llm_action, observation, legal_actions), None
+        llm_action = _extract_action(content, legal_tokens)
+        llm_channel, llm_arg = _parse_action_token(llm_action)
+        candidate_channel = _select_final_action(llm_channel, observation, legal_actions)
+        if candidate_channel != llm_channel:
+            final_channel = candidate_channel
+            final_arg = DEFAULT_ARG_BY_CHANNEL.get(final_channel, "")
+        else:
+            final_channel = llm_channel
+            final_arg = llm_arg or DEFAULT_ARG_BY_CHANNEL.get(final_channel, "")
+        final_token = (
+            f"{final_channel}({final_arg})" if final_channel != "IGNORE" else "IGNORE"
+        )
+        if final_token not in legal_tokens:
+            # Keep backward compatibility: accept bare channel when legal map absent.
+            if legal_action_map:
+                for token in legal_tokens:
+                    if token.startswith(f"{final_channel}(") or token == final_channel:
+                        final_token = token
+                        break
+        channel, arg = _parse_action_token(final_token)
+        return _build_action_payload(channel, arg), final_token, None
     except Exception as exc:
         fallback = _rule_policy_action(observation, legal_actions)
-        return fallback, str(exc)
+        arg = DEFAULT_ARG_BY_CHANNEL.get(fallback, "")
+        fallback_token = f"{fallback}({arg})" if fallback != "IGNORE" else "IGNORE"
+        return _build_action_payload(fallback, arg), fallback_token, str(exc)
 
 
 async def run_episode(
@@ -258,9 +360,16 @@ async def run_episode(
         step_n += 1
         obs_dict = obs.model_dump(mode="json")
         legal = list(obs.legal_actions or ALL_ACTIONS)
-        action, llm_err = choose_action(client, model_name, obs_dict, legal)
+        legal_map = getattr(obs, "legal_action_map", None)
+        action_payload, action_token, llm_err = choose_action(
+            client,
+            model_name,
+            obs_dict,
+            legal,
+            legal_action_map=legal_map if isinstance(legal_map, dict) else None,
+        )
 
-        step_result = await env.step(LeadTriageAction(channel=action))
+        step_result = await env.step(LeadTriageAction(**action_payload))
         obs = step_result.observation
         done = bool(step_result.done)
         reward = _safe_float(step_result.reward)
@@ -273,7 +382,7 @@ async def run_episode(
 
         log_step(
             step=step_n,
-            action=action,
+            action=action_token,
             reward=reward,
             done=done,
             error=err_out,
