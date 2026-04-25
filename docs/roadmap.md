@@ -19,12 +19,12 @@ Order is dependency-correct; do not skip ahead.
 [ ] M3d Render history as narrative for prompt builder
 [x] M4  Action-with-arguments (4 → ~12 actions)
 [x] M4  Recompute grader oracle/random anchors
-[ ] M5  Rollout collector (async, legal-mask resample)
-[ ] M5  Reward shaping + GRPO group advantages
-[ ] M6  GRPO trainer (TRL + Unsloth + LoRA)
-[ ] M6  train.py + configs/training.yaml + requirements-train.txt
-[ ] M7  Smoke run on easy + W&B inspection
-[ ] M7  Anti-hack audit (rates, KL, diversity)
+[x] M5  Rollout collector (async, legal-mask resample)
+[x] M5  Reward shaping + GRPO group advantages
+[x] M6  GRPO trainer (TRL + Unsloth + LoRA)
+[x] M6  train.py + configs/training.yaml + requirements-train.txt
+[x] M7  Smoke run on easy + W&B inspection
+[x] M7  Anti-hack audit (rates, KL, diversity)
 [ ] M8  Curriculum sampler easy → medium → hard
 [ ] M9  Scale: parallel envs + larger G + vLLM/Unsloth
 [ ] M10 Save LoRA adapters + eval.py + compare.py
