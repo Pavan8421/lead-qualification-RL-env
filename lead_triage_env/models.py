@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 
 from openenv.core.env_server import Action, Observation, State
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 LeadChannel = Literal["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"]
 UrgencyLevel = Literal["low", "medium", "high"]
@@ -23,6 +23,8 @@ LeadEvent = Literal[
 
 class LeadTriageAction(Action):
     """One outreach decision for the current lead."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     channel: LeadChannel = Field(
         ...,
@@ -108,3 +110,33 @@ class LeadTriageState(State):
     )
     converted: bool = Field(default=False, description="Whether lead converted this episode")
     episode_done: bool = Field(default=False, description="Terminal flag mirror")
+    invalid_follow_up_count: int = Field(
+        default=0,
+        ge=0,
+        description="Count of illegal FOLLOW_UP attempts across this process",
+    )
+    consecutive_repeat_count: int = Field(
+        default=0,
+        ge=0,
+        description="Count of repeat-streak penalties triggered across this process",
+    )
+    timeout_count: int = Field(
+        default=0,
+        ge=0,
+        description="Count of per-step timeout events across this process",
+    )
+    illegal_payload_count: int = Field(
+        default=0,
+        ge=0,
+        description="Count of malformed /step payloads rejected with HTTP 422",
+    )
+    episodes_started: int = Field(
+        default=0,
+        ge=0,
+        description="Total episodes started by this process",
+    )
+    episode_cap: int = Field(
+        default=100000,
+        ge=1,
+        description="Maximum episodes allowed for this process",
+    )

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from openenv.core.env_server import create_app
+from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.responses import HTMLResponse
 
 from ..models import LeadTriageAction, LeadTriageObservation
@@ -16,6 +19,28 @@ app = create_app(
     LeadTriageObservation,
     env_name="lead_triage_env",
 )
+
+# Replace default /state so we can surface extended counters.
+app.router.routes = [
+    route
+    for route in app.router.routes
+    if not (getattr(route, "path", None) == "/state" and "GET" in getattr(route, "methods", set()))
+]
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    if request.url.path.endswith("/step"):
+        LeadTriageEnvironment.record_illegal_payload()
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.get("/state")
+async def state() -> dict:
+    env = LeadTriageEnvironment()
+    return env.state.model_dump()
 
 
 @app.get("/", response_class=HTMLResponse)

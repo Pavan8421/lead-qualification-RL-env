@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import time
 import uuid
 from typing import Any, List, Literal, Optional, cast
 
@@ -13,7 +14,7 @@ from ..dynamics import LeadOutcome, sample_outcome
 from ..features import build_observable_features, sample_latent_quality
 from ..grader import grade_episode_from_log
 from ..models import LeadEvent, LeadTriageAction, LeadTriageObservation, LeadTriageState
-from ..rewards import ignore_opportunity_cost, step_reward
+from ..rewards import ignore_opportunity_cost, reward_breakdown, step_reward
 from ..task_tier import TierConfig, normalize_tier, TIER_CONFIGS
 
 LeadChannel = Literal["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"]
@@ -30,10 +31,20 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
     """One lead per episode; stochastic transitions; graded trajectory in metadata on terminal steps."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
+    _illegal_payload_count = 0
+    _invalid_follow_up_count = 0
+    _consecutive_repeat_count = 0
+    _timeout_count = 0
+    _episodes_started = 0
 
     def __init__(self, max_steps: int = 4) -> None:
         super().__init__()
         self._max_steps = max_steps
+        self._step_timeout_s = min(
+            float(os.environ.get("LEAD_STEP_TIMEOUT_S", "0.5")),
+            0.5,
+        )
+        self._episode_cap = int(os.environ.get("LEAD_EPISODE_CAP", "100000"))
         self._rng = random.Random()
         self._config: TierConfig = TIER_CONFIGS["easy"]
         self._tier_name = "easy"
@@ -45,6 +56,9 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
         self._last_action: Optional[str] = None
         self._action_streak = 0
         self._state: Optional[LeadTriageState] = None
+    @classmethod
+    def record_illegal_payload(cls) -> None:
+        cls._illegal_payload_count += 1
 
     def reset(
         self,
@@ -52,7 +66,12 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> LeadTriageObservation:
+        if LeadTriageEnvironment._episodes_started >= self._episode_cap:
+            raise RuntimeError(
+                f"Episode cap reached ({self._episode_cap}); restart server process."
+            )
         self._reset_rubric()
+        LeadTriageEnvironment._episodes_started += 1
         eid = episode_id or str(uuid.uuid4())
         tier_kw = kwargs.get("task_tier") or os.environ.get("LEAD_TASK_TIER")
         self._tier_name = normalize_tier(str(tier_kw) if tier_kw is not None else None)
@@ -112,6 +131,7 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
         if ch not in legal:
             self._state.step_count += 1
             r = -0.4
+            LeadTriageEnvironment._invalid_follow_up_count += 1
             self._state.cumulative_reward += r
             streak = self._action_streak + 1 if ch == self._last_action else 1
             self._last_action = ch
@@ -128,6 +148,8 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
         self._last_action = ch
         self._action_streak = streak
         repeat_penalty = -0.25 if streak >= 3 else 0.0
+        if repeat_penalty < 0.0:
+            LeadTriageEnvironment._consecutive_repeat_count += 1
 
         if ch == "IGNORE":
             base = ignore_opportunity_cost(self._latent)
@@ -150,33 +172,57 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
         if ch in ("CALL", "EMAIL"):
             self._has_contact = True
 
-        outcome: LeadOutcome | str = sample_outcome(
-            self._latent, ch, self._config, self._rng
-        )
-        sr = step_reward(
-            outcome=outcome,
+        started = time.perf_counter()
+        outcome: LeadOutcome | str = sample_outcome(self._latent, ch, self._config, self._rng)
+        elapsed = time.perf_counter() - started
+        timeout_limit = timeout_s if timeout_s is not None else self._step_timeout_s
+        timed_out = elapsed > timeout_limit
+        if timed_out:
+            LeadTriageEnvironment._timeout_count += 1
+            outcome = "horizon"
+
+        breakdown = reward_breakdown(
+            outcome=str(outcome),
             action=ch,
             quality=self._latent,
             tier_waste_mult=self._config.waste_penalty_multiplier,
+            converted=outcome == "converted",
+            step_index=self._state.step_count,
+            max_steps=self._max_steps,
+            action_parsed=True,
+            legal_actions=legal,
+            repetition_penalty=repeat_penalty,
+            contact_attempts=self._contact_attempts,
+            max_contacts=None,
+            terminal_grader=0.0,
         )
-        total_r = sr + repeat_penalty
+        total_r = breakdown.total
 
         self._state.step_count += 1
         self._state.cumulative_reward += total_r
 
-        terminal = outcome == "converted" or outcome == "churned"
+        terminal = outcome == "converted" or outcome == "churned" or timed_out
         if outcome == "converted":
             self._state.converted = True
 
         if self._state.step_count >= self._max_steps and not terminal:
             terminal = True
             self._state.cumulative_reward -= total_r
-            total_r = step_reward(
+            total_r = reward_breakdown(
                 outcome="horizon",
                 action=ch,
                 quality=self._latent,
                 tier_waste_mult=self._config.waste_penalty_multiplier,
-            ) + repeat_penalty
+                converted=False,
+                step_index=self._state.step_count,
+                max_steps=self._max_steps,
+                action_parsed=True,
+                legal_actions=legal,
+                repetition_penalty=repeat_penalty,
+                contact_attempts=self._contact_attempts,
+                max_contacts=None,
+                terminal_grader=0.0,
+            ).total
             self._state.cumulative_reward += total_r
             outcome = "horizon"
 
@@ -198,8 +244,24 @@ class LeadTriageEnvironment(Environment[LeadTriageAction, LeadTriageObservation,
     @property
     def state(self) -> LeadTriageState:
         if self._state is None:
-            return LeadTriageState()
-        return self._state
+            return LeadTriageState(
+                invalid_follow_up_count=LeadTriageEnvironment._invalid_follow_up_count,
+                consecutive_repeat_count=LeadTriageEnvironment._consecutive_repeat_count,
+                timeout_count=LeadTriageEnvironment._timeout_count,
+                illegal_payload_count=LeadTriageEnvironment._illegal_payload_count,
+                episodes_started=LeadTriageEnvironment._episodes_started,
+                episode_cap=self._episode_cap,
+            )
+        return self._state.model_copy(
+            update={
+                "invalid_follow_up_count": LeadTriageEnvironment._invalid_follow_up_count,
+                "consecutive_repeat_count": LeadTriageEnvironment._consecutive_repeat_count,
+                "timeout_count": LeadTriageEnvironment._timeout_count,
+                "illegal_payload_count": LeadTriageEnvironment._illegal_payload_count,
+                "episodes_started": LeadTriageEnvironment._episodes_started,
+                "episode_cap": self._episode_cap,
+            }
+        )
 
     def _derive_seed(self, episode_id: str) -> int:
         return (hash(episode_id) & 0x7FFFFFFF) or 1
