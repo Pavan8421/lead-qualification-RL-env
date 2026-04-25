@@ -5,10 +5,16 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 
 from openenv.core.env_server import Action, Observation, State
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 LeadChannel = Literal["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"]
 UrgencyLevel = Literal["low", "medium", "high"]
+IntentEstimate = Literal["low", "medium", "high", "unknown"]
+InteractionDirection = Literal["outbound", "inbound"]
+EmailTemplate = Literal["generic", "value_prop", "case_study", "re_engage"]
+CallScript = Literal["discovery", "demo", "closing"]
+FollowUpChannel = Literal["email", "call"]
+FollowUpTone = Literal["soft", "firm"]
 LeadEvent = Literal[
     "none",
     "converted",
@@ -30,6 +36,75 @@ class LeadTriageAction(Action):
         ...,
         description="Outbound action: CALL, EMAIL, FOLLOW_UP, or IGNORE",
     )
+    template: Optional[EmailTemplate] = Field(
+        default=None,
+        description="EMAIL argument; defaults to generic when omitted",
+    )
+    script: Optional[CallScript] = Field(
+        default=None,
+        description="CALL argument; defaults to discovery when omitted",
+    )
+    follow_up_channel: Optional[FollowUpChannel] = Field(
+        default=None,
+        description="FOLLOW_UP argument: email or call",
+    )
+    follow_up_tone: Optional[FollowUpTone] = Field(
+        default=None,
+        description="FOLLOW_UP argument: soft or firm",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_and_validate(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        channel = data.get("channel")
+        if channel == "EMAIL":
+            data["template"] = data.get("template") or "generic"
+            if any(data.get(k) is not None for k in ("script", "follow_up_channel", "follow_up_tone")):
+                raise ValueError("EMAIL action must only include template argument")
+            return data
+        if channel == "CALL":
+            data["script"] = data.get("script") or "discovery"
+            if any(data.get(k) is not None for k in ("template", "follow_up_channel", "follow_up_tone")):
+                raise ValueError("CALL action must only include script argument")
+            return data
+        if channel == "FOLLOW_UP":
+            data["follow_up_channel"] = data.get("follow_up_channel") or "email"
+            data["follow_up_tone"] = data.get("follow_up_tone") or "soft"
+            if any(data.get(k) is not None for k in ("template", "script")):
+                raise ValueError("FOLLOW_UP action must only include follow_up_channel/follow_up_tone")
+            return data
+        if channel == "IGNORE":
+            if any(data.get(k) is not None for k in ("template", "script", "follow_up_channel", "follow_up_tone")):
+                raise ValueError("IGNORE action cannot include arguments")
+        return data
+
+
+class Interaction(Observation):
+    day_offset: int = Field(default=0, description="Relative day offset from current step")
+    channel: LeadChannel = Field(default="EMAIL")
+    direction: InteractionDirection = Field(default="outbound")
+    outcome: LeadEvent = Field(default="none")
+    topic: str = Field(default="", description="Short topic for this interaction")
+    sentiment: float = Field(
+        default=0.0,
+        ge=-1.0,
+        le=1.0,
+        description="Sentiment for inbound/outbound interaction note",
+    )
+    duration_min: int = Field(default=0, ge=0)
+    note: str = Field(default="", description="Narrative note for prompt rendering")
+
+
+class HistorySummary(Observation):
+    total_touches: int = Field(default=0, ge=0)
+    days_since_first_touch: int = Field(default=0, ge=0)
+    days_since_last_touch: int = Field(default=0, ge=0)
+    inbound_count: int = Field(default=0, ge=0)
+    last_inbound_sentiment: float = Field(default=0.0, ge=-1.0, le=1.0)
+    longest_silence_gap: int = Field(default=0, ge=0)
+    raised_objections: List[str] = Field(default_factory=list)
 
 
 class LeadTriageObservation(Observation):
@@ -49,7 +124,17 @@ class LeadTriageObservation(Observation):
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Model-estimated purchase intent (noisy vs latent quality)",
+        description=(
+            "Model-estimated purchase intent (noisy vs latent quality). "
+            "Masked to 0.0 pre-contact when env_version=v2."
+        ),
+    )
+    intent_estimate: IntentEstimate = Field(
+        default="unknown",
+        description=(
+            "Coarse pre-contact intent bucket derived from engagement_score + source. "
+            "Always 'unknown' on env_version=v1 for backward compatibility."
+        ),
     )
     job_title: str = Field(default="", description="Contact job title (sampled category)")
     contact_attempts: int = Field(
@@ -80,6 +165,13 @@ class LeadTriageObservation(Observation):
         default_factory=lambda: ["CALL", "EMAIL", "FOLLOW_UP", "IGNORE"],
         description="Allowed actions this step (FOLLOW_UP gated until contact)",
     )
+    legal_action_map: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Structured legal actions for M4: channel -> allowed argument keys. "
+            "Argument keys are script/template variants or 'channel:tone' for FOLLOW_UP."
+        ),
+    )
     task_tier: str = Field(
         default="easy",
         description="Current task tier for this episode",
@@ -93,6 +185,14 @@ class LeadTriageObservation(Observation):
     trajectory: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Episode trajectory records (for debugging/grading fallback)",
+    )
+    contact_history: List[Interaction] = Field(
+        default_factory=list,
+        description="Prior interactions for this lead (v2 realism feature)",
+    )
+    history_summary: HistorySummary = Field(
+        default_factory=HistorySummary,
+        description="Compact scalar summary of contact history",
     )
 
 

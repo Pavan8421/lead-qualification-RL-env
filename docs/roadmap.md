@@ -11,14 +11,14 @@ Order is dependency-correct; do not skip ahead.
 [ ] M0  Lock decisions (model/algo/logging/SFT)
 [x] M1  Env hardening (per-step timeout, 422, counters)
 [x] M2  Verifier panel — multi-reward breakdown
-[ ] M3a Partial observability (gate intent_score)
-[ ] M3b Cooldowns + per-episode contact budget
-[ ] M3c Per-episode industry fix
-[ ] M3d Lead pre-history at reset (persona-driven, 5–10 prior interactions)
-[ ] M3d Persona archetypes (5–6) + sampler
+[x] M3a Partial observability (gate intent_score)
+[x] M3b Cooldowns + per-episode contact budget
+[x] M3c Per-episode industry fix
+[x] M3d Lead pre-history at reset (persona-driven, 5–10 prior interactions)
+[x] M3d Persona archetypes (5–6) + sampler
 [ ] M3d Render history as narrative for prompt builder
-[ ] M4  Action-with-arguments (4 → ~12 actions)
-[ ] M4  Recompute grader oracle/random anchors
+[x] M4  Action-with-arguments (4 → ~12 actions)
+[x] M4  Recompute grader oracle/random anchors
 [ ] M5  Rollout collector (async, legal-mask resample)
 [ ] M5  Reward shaping + GRPO group advantages
 [ ] M6  GRPO trainer (TRL + Unsloth + LoRA)
