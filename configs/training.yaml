@@ -66,6 +66,8 @@ training:
 
   # Optimizer.
   learning_rate: 5.0e-6
+  grad_clip: 1.0
+  use_reference_model: true       # set false to skip KL (saves ~1× model memory)
   total_optimizer_steps: 50          # M7 smoke run target
   episodes_per_step: 8               # B prompts; G=num_generations from m0_decisions
   save_every_steps: 25

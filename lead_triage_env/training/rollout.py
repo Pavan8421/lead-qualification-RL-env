@@ -41,6 +41,8 @@ class StepRecord:
     done: bool
     last_event: str
     invalid_resamples: int = 0
+    # Handle returned by `policy.sample_with_ids` (None for stub / API policies).
+    sample_handle: Optional[int] = None
 
 
 @dataclass
@@ -180,8 +182,16 @@ async def collect_episode(
         invalid_resamples = 0
         chosen_token: Optional[str] = None
         raw_completion = ""
+        chosen_handle: Optional[int] = None
         for _ in range(max_resamples + 1):
-            raw_completion = await policy_fn(messages, legal_tokens)
+            result = await policy_fn(messages, legal_tokens)
+            # Policy fn may return either `text` or `(text, handle)`.
+            if isinstance(result, tuple):
+                raw_completion, handle_val = result
+                chosen_handle = int(handle_val)
+            else:
+                raw_completion = result
+                chosen_handle = None
             chosen_token = parse_action_token(raw_completion, legal_tokens)
             if chosen_token is not None:
                 break
@@ -231,6 +241,7 @@ async def collect_episode(
                 done=done,
                 last_event=last_event,
                 invalid_resamples=invalid_resamples,
+                sample_handle=chosen_handle,
             )
         )
         rollout.per_step_rewards.append(reward)

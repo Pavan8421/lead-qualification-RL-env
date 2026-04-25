@@ -158,7 +158,15 @@ class LeadTriageGRPOTrainer:
         self, *, seed: int, tier: str, group_size: int
     ) -> List[EpisodeRollout]:
         env = await self._ensure_env()
-        policy_fn = self.policy.as_async_policy_fn()
+        # If the policy supports id capture, use it so grpo_update can
+        # re-score the exact same tokens that produced the rollout.
+        if hasattr(self.policy, "as_async_policy_fn"):
+            try:
+                policy_fn = self.policy.as_async_policy_fn(capture_ids=True)
+            except TypeError:
+                policy_fn = self.policy.as_async_policy_fn()
+        else:
+            raise RuntimeError("policy must expose `as_async_policy_fn`")
         sem = asyncio.Semaphore(self.config.env_concurrency)
 
         async def _one(g_idx: int) -> EpisodeRollout:
@@ -175,13 +183,20 @@ class LeadTriageGRPOTrainer:
     # ----- public API ---------------------------------------------------
 
     async def step_once(self, *, step_index: int) -> Dict[str, float]:
-        """Run a single optimizer step (collect + apply gradient)."""
-        try:
-            from trl import GRPOTrainer  # type: ignore  # noqa: F401
-        except ImportError as exc:  # pragma: no cover - env-specific
-            raise RuntimeError(
-                "trl is required for training. Install requirements-train.txt."
-            ) from exc
+        """Run a single optimizer step (collect group + apply GRPO gradient).
+
+        Pipeline:
+          1. Pick a tier from `tier_mix`.
+          2. Collect G env episodes with the current policy (sampling
+             captures token ids via `policy.sample_with_ids`).
+          3. Compute the GRPO group advantages over the G episode scalars.
+          4. For each step in each rollout, broadcast the rollout's
+             advantage to that step's `sample_handle` (so every action
+             token contributes a policy-gradient term).
+          5. Call `policy.grpo_update(handles, advantages)` -> one
+             AdamW step on the LoRA params.
+        """
+        from .rewards import group_advantages
 
         tier = self.config.tier_mix[step_index % len(self.config.tier_mix)]
         rollouts = await self._collect_group(
@@ -195,14 +210,25 @@ class LeadTriageGRPOTrainer:
             for r in rollouts
         ]
         scalars = [r["scalar_reward"] for r in rewards]
-
-        # NOTE: a full integration with TRL.GRPOTrainer.training_step requires
-        # building a `Dataset` of prompts + supplying our custom rollout-aware
-        # generator. That wiring is left for the M7 smoke run; here we just
-        # surface metrics so `train.py --steps 1` exercises the loop end-to-end.
-        from .rewards import group_advantages
-
         advantages = group_advantages(scalars)
+
+        # Broadcast each episode's advantage to its constituent steps.
+        handles: List[int] = []
+        per_step_adv: List[float] = []
+        for rollout, adv in zip(rollouts, advantages):
+            for step in rollout.steps:
+                if step.sample_handle is None:
+                    continue
+                handles.append(int(step.sample_handle))
+                per_step_adv.append(float(adv))
+
+        update_metrics: Dict[str, float] = {}
+        if handles and hasattr(self.policy, "grpo_update"):
+            update_metrics = self.policy.grpo_update(handles, per_step_adv)
+        elif hasattr(self.policy, "release_handles"):
+            # Eval / stub path — drop any cached ids without a gradient step.
+            self.policy.release_handles(handles)
+
         metrics: Dict[str, float] = {
             "step": float(step_index),
             "tier": float({"easy": 0, "medium": 1, "hard": 2}.get(tier, 0)),
@@ -221,7 +247,10 @@ class LeadTriageGRPOTrainer:
             ),
             "max_repeat_streak": float(max((r["repeat_streak_max"] for r in rewards), default=0)),
             "advantage_std": float(_std(advantages)),
+            "n_grad_samples": float(len(handles)),
         }
+        for k, v in update_metrics.items():
+            metrics[f"train/{k}"] = v
         return metrics
 
 

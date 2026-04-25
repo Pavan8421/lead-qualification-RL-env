@@ -40,7 +40,9 @@ def _build_policy_config(raw: Dict[str, Any]) -> PolicyConfig:
     m0 = raw.get("m0_decisions", {})
     model_block = m0.get("model", {})
     eff_block = m0.get("efficiency", {})
-    sampling = (raw.get("training") or {}).get("sampling", {})
+    algo = m0.get("algorithm", {})
+    training = raw.get("training") or {}
+    sampling = training.get("sampling", {})
     return PolicyConfig(
         model_name=model_block.get("primary", PolicyConfig.model_name),
         load_in_4bit=bool(model_block.get("load_in_4bit", True)),
@@ -51,6 +53,10 @@ def _build_policy_config(raw: Dict[str, Any]) -> PolicyConfig:
         lora_rank=int(eff_block.get("lora_rank", 16)),
         lora_alpha=int(eff_block.get("lora_alpha", 32)),
         lora_target=str(eff_block.get("lora_target", "all-linear")),
+        learning_rate=float(training.get("learning_rate", 5e-6)),
+        kl_beta=float(algo.get("kl_beta", 0.04)),
+        grad_clip=float(training.get("grad_clip", 1.0)),
+        use_reference_model=bool(training.get("use_reference_model", True)),
     )
 
 
