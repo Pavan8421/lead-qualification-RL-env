@@ -27,6 +27,16 @@ from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
+# Disable websocket keepalive pings before importing the env client.
+# CPU-vLLM generation can exceed the default 20s ping timeout and drop the WS.
+import openenv.core.env_client as _oec
+_orig_ws_connect = _oec.ws_connect
+def _patched_ws_connect(*args, **kwargs):
+    kwargs.setdefault("ping_interval", None)
+    kwargs.setdefault("ping_timeout", None)
+    return _orig_ws_connect(*args, **kwargs)
+_oec.ws_connect = _patched_ws_connect
+
 from lead_triage_env import LeadTriageAction, LeadTriageEnv, grade_episode_from_log
 
 
@@ -222,6 +232,10 @@ def _select_final_action(
     if llm_action not in legal_actions:
         return _rule_policy_action(observation, legal_actions)
 
+    # Escape hatch: bypass rule guardrails so eval reflects raw LLM policy.
+    if os.environ.get("INFERENCE_DISABLE_GUARDRAILS") == "1":
+        return llm_action
+
     intent = _effective_intent(observation)
     attempts = int(_safe_float(observation.get("contact_attempts"), 0))
     has_prior = bool(observation.get("has_prior_contact", False))
@@ -290,7 +304,7 @@ def choose_action(
     try:
         completion = client.chat.completions.create(
             model=model_name,
-            temperature=0,
+            temperature=float(os.environ.get("INFERENCE_TEMPERATURE", "0")),
             max_tokens=8,
             messages=[
                 {
@@ -361,12 +375,13 @@ async def run_episode(
         obs_dict = obs.model_dump(mode="json")
         legal = list(obs.legal_actions or ALL_ACTIONS)
         legal_map = getattr(obs, "legal_action_map", None)
-        action_payload, action_token, llm_err = choose_action(
+        action_payload, action_token, llm_err = await asyncio.to_thread(
+            choose_action,
             client,
             model_name,
             obs_dict,
             legal,
-            legal_action_map=legal_map if isinstance(legal_map, dict) else None,
+            legal_map if isinstance(legal_map, dict) else None,
         )
 
         step_result = await env.step(LeadTriageAction(**action_payload))
@@ -406,45 +421,48 @@ async def run_episode(
 
 
 async def _async_main() -> None:
-    env: Optional[LeadTriageEnv] = None
+    _load_dotenv_if_present()
 
-    try:
-        _load_dotenv_if_present()
-
-        API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-        MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-        api_key = (
-            os.getenv("OPENAI_API_KEY", "").strip()
-            or os.getenv("HF_TOKEN", "").strip()
-            or os.getenv("API_KEY", "").strip()
-        )
-        if not api_key:
-            raise RuntimeError(
-                "Missing API key: set HF_TOKEN (preferred) or OPENAI_API_KEY or API_KEY"
-            )
-
-        benchmark = os.getenv("LEAD_TRIAGE_BENCHMARK", "lead_triage_env")
-        env_base_url = os.getenv("LEAD_TRIAGE_ENV_BASE_URL", "http://localhost:8000")
-        episodes_per_tier = int(os.getenv("EPISODES_PER_TIER", "8"))
-        base_seed = int(os.getenv("BASE_SEED", "1337"))
-        local_image = (
-            os.getenv("LOCAL_IMAGE_NAME", "").strip()
-            or os.getenv("IMAGE_NAME", "").strip()
+    API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
+    api_key = (
+        os.getenv("OPENAI_API_KEY", "").strip()
+        or os.getenv("HF_TOKEN", "").strip()
+        or os.getenv("API_KEY", "").strip()
+    )
+    if not api_key:
+        raise RuntimeError(
+            "Missing API key: set HF_TOKEN (preferred) or OPENAI_API_KEY or API_KEY"
         )
 
-        client = OpenAI(base_url=API_BASE_URL, api_key=api_key)
+    benchmark = os.getenv("LEAD_TRIAGE_BENCHMARK", "lead_triage_env")
+    env_base_url = os.getenv("LEAD_TRIAGE_ENV_BASE_URL", "http://localhost:8000")
+    episodes_per_tier = int(os.getenv("EPISODES_PER_TIER", "8"))
+    base_seed = int(os.getenv("BASE_SEED", "1337"))
+    local_image = (
+        os.getenv("LOCAL_IMAGE_NAME", "").strip()
+        or os.getenv("IMAGE_NAME", "").strip()
+    )
 
-        if local_image:
-            env = await LeadTriageEnv.from_docker_image(local_image)
-        else:
-            env = LeadTriageEnv(base_url=env_base_url)
-            await env.connect()
+    client = OpenAI(base_url=API_BASE_URL, api_key=api_key)
 
-        for tier_index, tier in enumerate(TIERS):
-            for i in range(episodes_per_tier):
-                seed = base_seed + (tier_index * 10000) + i
-                default_task = f"lead_triage-{tier}-{i}"
-                task_name = os.getenv("LEAD_TRIAGE_TASK", "").strip() or default_task
+    for tier_index, tier in enumerate(TIERS):
+        for i in range(episodes_per_tier):
+            seed = base_seed + (tier_index * 10000) + i
+            default_task = f"lead_triage-{tier}-{i}"
+            task_name = os.getenv("LEAD_TRIAGE_TASK", "").strip() or default_task
+
+            # Fresh env client per episode — server closes the WS after `done`,
+            # so reusing one client triggers `received 1000 (OK); then sent 1000
+            # (OK)` on the next reset.
+            env: Optional[LeadTriageEnv] = None
+            try:
+                if local_image:
+                    env = await LeadTriageEnv.from_docker_image(local_image)
+                else:
+                    env = LeadTriageEnv(base_url=env_base_url)
+                    await env.connect()
+
                 await run_episode(
                     env,
                     client,
@@ -454,18 +472,22 @@ async def _async_main() -> None:
                     tier,
                     seed,
                 )
-    except Exception as exc:
-        print(f"[DEBUG] inference failed: {exc}", file=sys.stderr, flush=True)
-    finally:
-        if env is not None:
-            try:
-                await env.close()
-            except Exception as close_exc:
+            except Exception as exc:
                 print(
-                    f"[DEBUG] env.close() error: {close_exc}",
+                    f"[DEBUG] episode failed (tier={tier} i={i}): {exc}",
                     file=sys.stderr,
                     flush=True,
                 )
+            finally:
+                if env is not None:
+                    try:
+                        await env.close()
+                    except Exception as close_exc:
+                        print(
+                            f"[DEBUG] env.close() error: {close_exc}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
 
 
 def main() -> None:

@@ -1,0 +1,672 @@
+{
+  "always_call": [
+    {
+      "tier": "easy",
+      "seed": 1337,
+      "score": 0.6594,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        4.6,
+        -1.5
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1338,
+      "score": 0.9558,
+      "steps": 1,
+      "rewards": [
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1340,
+      "score": 0.6594,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        4.85,
+        0.6000000000000001,
+        -0.5
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11337,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11338,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11339,
+      "score": 0.1246,
+      "steps": 2,
+      "rewards": [
+        0.8500000000000001,
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11340,
+      "score": 0.3307,
+      "steps": 3,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        -2.4000000000000004
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21337,
+      "score": 0.9558,
+      "steps": 1,
+      "rewards": [
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21338,
+      "score": 0.9558,
+      "steps": 2,
+      "rewards": [
+        0.8500000000000001,
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -5.25
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21340,
+      "score": 0.2154,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        -2.25,
+        -2.5,
+        0.05
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "CALL(discovery)",
+        "IGNORE"
+      ]
+    }
+  ],
+  "always_email": [
+    {
+      "tier": "easy",
+      "seed": 1337,
+      "score": 0.6594,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        4.6,
+        -1.5
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1338,
+      "score": 0.8988,
+      "steps": 3,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        12.1
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1340,
+      "score": 0.5062,
+      "steps": 4,
+      "rewards": [
+        0.8500000000000001,
+        4.85,
+        0.6000000000000001,
+        -0.5
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11337,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11338,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11339,
+      "score": 0.1246,
+      "steps": 2,
+      "rewards": [
+        0.8500000000000001,
+        -2.1500000000000004
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11340,
+      "score": 0.3307,
+      "steps": 3,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        -2.4000000000000004
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21337,
+      "score": 0.9558,
+      "steps": 1,
+      "rewards": [
+        12.35
+      ],
+      "actions": [
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21338,
+      "score": 0.9558,
+      "steps": 2,
+      "rewards": [
+        0.8500000000000001,
+        12.35
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -2.9250000000000007
+      ],
+      "actions": [
+        "EMAIL(generic)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21340,
+      "score": 0.4661,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        0.07500000000000018,
+        -0.17499999999999982,
+        0.05
+      ],
+      "actions": [
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "EMAIL(generic)",
+        "IGNORE"
+      ]
+    }
+  ],
+  "always_follow_up": [
+    {
+      "tier": "easy",
+      "seed": 1337,
+      "score": 0.7164,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        4.85,
+        -1.5
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)",
+        "FOLLOW_UP(email:soft)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1338,
+      "score": 0.9558,
+      "steps": 1,
+      "rewards": [
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1340,
+      "score": 0.7164,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        4.85,
+        0.8500000000000001,
+        -0.5
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)",
+        "FOLLOW_UP(email:soft)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11337,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11338,
+      "score": 0.0767,
+      "steps": 1,
+      "rewards": [
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11339,
+      "score": 0.5845,
+      "steps": 4,
+      "rewards": [
+        0.8500000000000001,
+        0.8500000000000001,
+        4.85,
+        -0.5
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)",
+        "FOLLOW_UP(email:soft)",
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11340,
+      "score": 0.398,
+      "steps": 3,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        -2.1500000000000004
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)",
+        "FOLLOW_UP(email:soft)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21337,
+      "score": 0.9558,
+      "steps": 1,
+      "rewards": [
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21338,
+      "score": 0.9558,
+      "steps": 2,
+      "rewards": [
+        0.8500000000000001,
+        12.35
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21339,
+      "score": 0.0632,
+      "steps": 1,
+      "rewards": [
+        -5.25
+      ],
+      "actions": [
+        "CALL(discovery)"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21340,
+      "score": 0.6202,
+      "steps": 4,
+      "rewards": [
+        4.85,
+        0.8500000000000001,
+        0.8500000000000001,
+        0.05
+      ],
+      "actions": [
+        "CALL(discovery)",
+        "FOLLOW_UP(email:soft)",
+        "FOLLOW_UP(email:soft)",
+        "IGNORE"
+      ]
+    }
+  ],
+  "always_ignore": [
+    {
+      "tier": "easy",
+      "seed": 1337,
+      "score": 0.1245,
+      "steps": 1,
+      "rewards": [
+        -1.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1338,
+      "score": 0.1245,
+      "steps": 1,
+      "rewards": [
+        -1.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1339,
+      "score": 0.1245,
+      "steps": 1,
+      "rewards": [
+        -1.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "easy",
+      "seed": 1340,
+      "score": 0.1836,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11337,
+      "score": 0.2077,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11338,
+      "score": 0.2077,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11339,
+      "score": 0.2077,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "medium",
+      "seed": 11340,
+      "score": 0.2077,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21337,
+      "score": 0.2594,
+      "steps": 1,
+      "rewards": [
+        0.05
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21338,
+      "score": 0.2298,
+      "steps": 1,
+      "rewards": [
+        -0.5
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21339,
+      "score": 0.2594,
+      "steps": 1,
+      "rewards": [
+        0.05
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    },
+    {
+      "tier": "hard",
+      "seed": 21340,
+      "score": 0.2594,
+      "steps": 1,
+      "rewards": [
+        0.05
+      ],
+      "actions": [
+        "IGNORE"
+      ]
+    }
+  ]
+}

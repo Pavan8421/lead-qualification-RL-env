@@ -1,0 +1,26 @@
+{
+  "n_episodes": 20,
+  "n_steps": 20,
+  "mean_grader": 0.04779,
+  "conversion_rate": 0.05,
+  "invalid_resample_rate": 0.0,
+  "action_distribution": {
+    "EMAIL(value_prop)": 20
+  },
+  "single_action_share_top": 1.0,
+  "action_entropy_nats": 0.0,
+  "mean_repeat_streak_max": 1.0,
+  "thresholds": {
+    "invalid_follow_up_rate_max": 0.02,
+    "single_action_share_max": 0.85,
+    "kl_to_base_max": 10.0,
+    "action_entropy_min_nats": 1.5,
+    "rule_baseline_grader_easy": 0.45
+  },
+  "failures": [
+    "single_action_share=1.000 > 0.850 (top='EMAIL(value_prop)')",
+    "action_entropy_nats=0.000 < 1.500",
+    "mean_grader=0.048 <= rule_baseline=0.450"
+  ],
+  "passed": false
+}

@@ -13,3 +13,22 @@ build/
 
 # OpenEnv / project outputs
 lead_triage_env/outputs/
+
+# Trained model weights — host on HF Hub instead. Keep configs/TB events
+# (small, useful for judges) but exclude multi-MB safetensors.
+outputs/adapters/**/*.safetensors
+outputs/adapters.*/**/*.safetensors
+outputs/adapters/**/*.bin
+outputs/adapters.*/**/*.bin
+outputs/adapters/**/*.pt
+outputs/adapters.*/**/*.pt
+
+# Large rollout logs (regeneratable from JSON)
+outputs/comparison/*.log
+outputs/logs/*.log
+
+# Local model caches
+.cache/
+
+# Organizer-distributed reference materials (not project artifacts)
+*.pdf

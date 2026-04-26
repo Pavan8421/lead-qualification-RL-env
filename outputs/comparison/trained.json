@@ -1,0 +1,206 @@
+[
+  {
+    "task": "lead_triage-easy-0",
+    "model": "trained",
+    "tier": "easy",
+    "success": true,
+    "steps": 1,
+    "score": 0.956,
+    "rewards": [
+      12.35
+    ],
+    "actions": [
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-easy-1",
+    "model": "trained",
+    "tier": "easy",
+    "success": true,
+    "steps": 1,
+    "score": 0.956,
+    "rewards": [
+      12.35
+    ],
+    "actions": [
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-easy-2",
+    "model": "trained",
+    "tier": "easy",
+    "success": true,
+    "steps": 1,
+    "score": 0.063,
+    "rewards": [
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-easy-3",
+    "model": "trained",
+    "tier": "easy",
+    "success": true,
+    "steps": 4,
+    "score": 0.659,
+    "rewards": [
+      4.85,
+      4.85,
+      0.6,
+      0.1
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)",
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-medium-0",
+    "model": "trained",
+    "tier": "medium",
+    "success": true,
+    "steps": 2,
+    "score": 0.35,
+    "rewards": [
+      4.85,
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-medium-1",
+    "model": "trained",
+    "tier": "medium",
+    "success": true,
+    "steps": 2,
+    "score": 0.956,
+    "rewards": [
+      0.85,
+      12.35
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-medium-2",
+    "model": "trained",
+    "tier": "medium",
+    "success": true,
+    "steps": 1,
+    "score": 0.077,
+    "rewards": [
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-medium-3",
+    "model": "trained",
+    "tier": "medium",
+    "success": true,
+    "steps": 2,
+    "score": 0.125,
+    "rewards": [
+      0.85,
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-hard-0",
+    "model": "trained",
+    "tier": "hard",
+    "success": true,
+    "steps": 3,
+    "score": 0.243,
+    "rewards": [
+      4.85,
+      -2.25,
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)",
+      "FOLLOW_UP(call:soft)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-hard-1",
+    "model": "trained",
+    "tier": "hard",
+    "success": true,
+    "steps": 2,
+    "score": 0.149,
+    "rewards": [
+      0.85,
+      -2.15
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-hard-2",
+    "model": "trained",
+    "tier": "hard",
+    "success": true,
+    "steps": 4,
+    "score": 0.052,
+    "rewards": [
+      -2.25,
+      -2.25,
+      -2.5,
+      0.1
+    ],
+    "actions": [
+      "CALL(demo)",
+      "CALL(demo)",
+      "CALL(demo)",
+      "CALL(demo)"
+    ],
+    "errors": 0
+  },
+  {
+    "task": "lead_triage-hard-3",
+    "model": "trained",
+    "tier": "hard",
+    "success": true,
+    "steps": 1,
+    "score": 0.063,
+    "rewards": [
+      -5.25
+    ],
+    "actions": [
+      "CALL(demo)"
+    ],
+    "errors": 0
+  }
+]
