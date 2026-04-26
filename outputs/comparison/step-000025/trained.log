@@ -1,0 +1,23 @@
+[START] task=lead_triage-easy-0 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=12.35 done=true error=null
+[END] success=true steps=1 score=0.956 rewards=12.35
+[START] task=lead_triage-easy-1 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=12.35 done=true error=null
+[END] success=true steps=1 score=0.956 rewards=12.35
+[START] task=lead_triage-medium-0 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=4.85 done=false error=null
+[STEP] step=2 action=CALL(discovery) reward=-2.15 done=true error=null
+[END] success=true steps=2 score=0.350 rewards=4.85,-2.15
+[START] task=lead_triage-medium-1 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=0.85 done=false error=null
+[STEP] step=2 action=CALL(discovery) reward=12.35 done=true error=null
+[END] success=true steps=2 score=0.956 rewards=0.85,12.35
+[START] task=lead_triage-hard-0 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=-2.25 done=false error=null
+[STEP] step=2 action=CALL(discovery) reward=-2.25 done=false error=null
+[STEP] step=3 action=CALL(discovery) reward=-5.50 done=true error=null
+[END] success=true steps=3 score=0.010 rewards=-2.25,-2.25,-5.50
+[START] task=lead_triage-hard-1 env=lead_triage_env model=trained
+[STEP] step=1 action=CALL(discovery) reward=0.85 done=false error=null
+[STEP] step=2 action=CALL(discovery) reward=-2.15 done=true error=null
+[END] success=true steps=2 score=0.149 rewards=0.85,-2.15

@@ -21,8 +21,8 @@ m0_decisions:
   algorithm:
     name: "grpo"
     framework: "trl"          # trl>=0.11
-    num_generations: 4        # G; raised to 8 in M9
-    kl_beta: 0.04             # KL drift control vs base; tighten if hacking (§8)
+    num_generations: 16       # G; A100 80GB easily fits this
+    kl_beta: 0.20             # raised from 0.05: run 19 drifted to kl≈5–7 with no reward gain after step 50
 
   # Efficiency layer. Unsloth patches HF model w/ Triton kernels; PEFT LoRA on top.
   efficiency:
@@ -62,22 +62,31 @@ training:
   seed: 1337
 
   # GRPO scalar = sum(per_step_rewards) + lambda * terminal_grader.
-  lambda_terminal_grader: 2.0
+  lambda_terminal_grader: 1.0
 
-  # Optimizer.
-  learning_rate: 5.0e-6
-  grad_clip: 1.0
-  use_reference_model: true       # set false to skip KL (saves ~1× model memory)
-  total_optimizer_steps: 50          # M7 smoke run target
-  episodes_per_step: 8               # B prompts; G=num_generations from m0_decisions
-  save_every_steps: 25
-  eval_every_steps: 25
+  # Backend & device. "auto" picks unsloth+CUDA when available, else falls
+  # back to plain HF transformers + PEFT on the best local device
+  # (cuda > mps > cpu). Override via the `backend:`/`device:` keys.
+  backend: "auto"           # "auto" | "unsloth" | "hf"
+  device: "auto"            # "auto" | "cuda" | "mps" | "cpu"
 
-  # Tier curriculum. M8 swaps this for a rolling-grader-driven sampler.
-  tier_mix: ["easy"]
+  # Optimizer. Conservative LR + KL anchor: at lr=2e-4 with anchor off the
+  # policy diverged (kl→80, mean_logprob→-14, conv_rate→0).
+  learning_rate: 3.0e-5
+  grad_clip: 0.5
+  use_reference_model: true       # ON: needed to keep updates bounded
+  total_optimizer_steps: 80          # run 19 plateaued by ~step 50; keep horizon short
+  episodes_per_step: 8               # B prompts; total rollouts/step = B*G = 128
+  save_every_steps: 10               # ckpts at 10/20/.../80 — pick best post-hoc
+  eval_every_steps: 10
+
+  # Tier curriculum. Medium tier appears reward-degenerate (~0.08 ceiling) so
+  # train on easy+hard only; keep medium for eval/inference comparison.
+  # 2:1 oversample of hard — easy is saturated, headroom is on hard.
+  tier_mix: ["easy", "hard", "hard"]
 
   # Rollout transport — must match the env server URL.
-  env_concurrency: 4
+  env_concurrency: 32                # bumped from 16 for ~30% faster rollouts
 
   # W&B (§15).
   log_to_wandb: true

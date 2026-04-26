@@ -1,0 +1,35 @@
+
+=== Running inference: model=Qwen/Qwen2.5-1.5B-Instruct ===
+
+=== Running inference: model=trained ===
+
+==============================================================================
+LEAD-TRIAGE: BASE vs TRAINED — comparison report
+==============================================================================
+
+metric                            BASE       TRAINED    delta
+------------------------------------------------------------------------------
+episodes (n)                         6             6
+grader score (mean)             0.5628        0.6017    ↑ +0.039
+grader score (median)           0.6530        0.6530    · +0.000
+grader score (std)              0.4054        0.3591    ↓ -0.046
+success rate                    1.0000        1.0000    · +0.000
+avg total reward                4.8833        6.6250    ↑ +1.742
+avg steps / ep                  1.8333        1.8333    · +0.000
+error rate (per step)           0.0000        0.0000    · +0.000
+
+--- per-tier mean grader score ---
+tier              BASE     TRAINED    delta
+easy            0.9560      0.9560    · +0.000
+hard            0.0795      0.1960    ↑ +0.117
+medium          0.6530      0.6530    · +0.000
+
+--- action distribution (channel only) ---
+action              BASE   TRAINED    delta
+CALL              100.0%     90.9%    ↓ -0.091
+FOLLOW_UP           0.0%      9.1%    ↑ +0.091
+
+--- verdict ---
+Trained model improved: grader mean 0.5628 -> 0.6017  (+6.9%); avg reward Δ +1.742
+
+Raw logs + parsed JSON written to: /Users/mshreeram/Developer/lead-qualification-RL-env/outputs/comparison/step-000050

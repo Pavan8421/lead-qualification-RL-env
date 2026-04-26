@@ -56,6 +56,17 @@ class PolicyConfig:
     # off (`kl_beta=0`) on tight VRAM budgets.
     use_reference_model: bool = True
 
+    # Backend selection. "auto" picks unsloth if importable + CUDA, else HF
+    # transformers on the best available device (cuda > mps > cpu).
+    backend: str = "auto"          # "auto" | "unsloth" | "hf"
+    device: str = "auto"           # "auto" | "cuda" | "mps" | "cpu"
+
+    # GRPO grad-accumulation chunk size. With B=12, G=16 we get ~192 handles
+    # per step; building one autograd graph over all of them OOMs small
+    # GPUs / MPS. Process this many handles per micro-batch and accumulate
+    # gradients before stepping. Set <=0 to disable (single big batch).
+    grpo_micro_batch_size: int = 16
+
 
 _DTYPE_MAP = {
     "bfloat16": "bfloat16",
@@ -92,19 +103,65 @@ class GRPOLLMPolicy:
         # Filled by `sample_with_ids`, drained by `grpo_update`.
         self._sample_cache: Dict[int, Tuple[Any, Any]] = {}
         self._next_handle = 0
+        # Serialize all GPU-touching code. The rollout collector calls
+        # `sample_with_ids` from up to G concurrent threads via
+        # `asyncio.to_thread`; HF/Unsloth `model.generate` is NOT thread-safe
+        # (rotary cache extension, KV cache allocation, Unsloth's
+        # `for_inference` toggle all mutate shared state). Concurrent calls
+        # corrupt position_ids -> CUDA index-out-of-bounds -> inf/nan logits.
+        import threading as _threading  # noqa: WPS433
+
+        self._gpu_lock = _threading.Lock()
 
     # ------------------------------------------------------------ load ----
 
-    def load(self) -> "GRPOLLMPolicy":
-        """Load Unsloth 4-bit base + apply LoRA adapter (PEFT) + reference model + optimizer."""
+    def _resolve_backend(self) -> str:
+        if self.config.backend != "auto":
+            return self.config.backend
         try:
-            from unsloth import FastLanguageModel  # type: ignore
-        except ImportError as exc:  # pragma: no cover - env-specific
-            raise RuntimeError(
-                "unsloth is required for training. Install requirements-train.txt "
-                "in a CUDA-enabled venv."
-            ) from exc
+            import torch  # noqa: WPS433
+
+            cuda_ok = torch.cuda.is_available()
+        except ImportError:
+            cuda_ok = False
+        if not cuda_ok:
+            return "hf"
+        try:
+            import unsloth  # type: ignore  # noqa: F401
+        except ImportError:
+            return "hf"
+        return "unsloth"
+
+    def _resolve_device(self) -> str:
+        if self.config.device != "auto":
+            return self.config.device
         import torch  # noqa: WPS433
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    def load(self) -> "GRPOLLMPolicy":
+        """Load model + LoRA + optional reference + AdamW.
+
+        Picks Unsloth (CUDA + 4-bit) when available, otherwise falls back to
+        plain HF transformers + PEFT on the best local device (MPS on Apple
+        Silicon, CPU on everything else without a GPU).
+        """
+        backend = self._resolve_backend()
+        if backend == "unsloth":
+            self._load_unsloth()
+        else:
+            self._load_hf()
+        self._build_optimizer()
+        return self
+
+    # --- backend: unsloth (CUDA + 4-bit) -----------------------------------
+
+    def _load_unsloth(self) -> None:
+        from unsloth import FastLanguageModel  # type: ignore
 
         dtype = _resolve_dtype(self.config.dtype)
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -125,7 +182,6 @@ class GRPOLLMPolicy:
         self._model = model
         self._tokenizer = tokenizer
 
-        # Frozen reference copy (no LoRA, base 4-bit weights only) for KL.
         if self.config.use_reference_model and self.config.kl_beta > 0:
             ref_model, _ = FastLanguageModel.from_pretrained(
                 model_name=self.config.model_name,
@@ -140,12 +196,80 @@ class GRPOLLMPolicy:
         else:
             self._ref_model = None
 
-        # Optimizer over LoRA params only (PEFT freezes the base).
+    # --- backend: HF transformers + PEFT (CUDA / MPS / CPU) ----------------
+
+    def _load_hf(self) -> None:
+        try:
+            import torch  # noqa: WPS433
+            from peft import LoraConfig, get_peft_model  # type: ignore
+            from transformers import (  # type: ignore
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "transformers + peft are required for the HF backend. "
+                "Install requirements-train-cpu.txt (Apple Silicon / CPU) or "
+                "requirements-train.txt (CUDA)."
+            ) from exc
+
+        device = self._resolve_device()
+        # MPS doesn't support bfloat16 on all ops yet -> fall back to float16.
+        dtype_name = self.config.dtype
+        if device == "mps" and dtype_name.lower() in ("bfloat16", "bf16"):
+            dtype_name = "float16"
+        if device == "cpu" and dtype_name.lower() in ("float16", "fp16"):
+            dtype_name = "float32"
+        dtype = _resolve_dtype(dtype_name)
+
+        tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        base = AutoModelForCausalLM.from_pretrained(
+            self.config.model_name,
+            torch_dtype=dtype,
+        ).to(device)
+        base.config.pad_token_id = tokenizer.pad_token_id
+
+        lora_cfg = LoraConfig(
+            r=self.config.lora_rank,
+            lora_alpha=self.config.lora_alpha,
+            lora_dropout=self.config.lora_dropout,
+            target_modules=self._lora_target_modules(),
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(base, lora_cfg)
+        # Make sure LoRA params are trainable & in fp32 (numerical stability).
+        for n, p in model.named_parameters():
+            if "lora_" in n:
+                p.requires_grad_(True)
+                if p.dtype not in (torch.float32, torch.float16, torch.bfloat16):
+                    p.data = p.data.to(torch.float32)
+        self._model = model
+        self._tokenizer = tokenizer
+
+        if self.config.use_reference_model and self.config.kl_beta > 0:
+            ref = AutoModelForCausalLM.from_pretrained(
+                self.config.model_name,
+                torch_dtype=dtype,
+            ).to(device)
+            ref.config.pad_token_id = tokenizer.pad_token_id
+            ref.eval()
+            for p in ref.parameters():
+                p.requires_grad_(False)
+            self._ref_model = ref
+        else:
+            self._ref_model = None
+
+    def _build_optimizer(self) -> None:
+        import torch  # noqa: WPS433
+
         trainable = [p for p in self._model.parameters() if p.requires_grad]
         self._optimizer = torch.optim.AdamW(
             trainable, lr=self.config.learning_rate, betas=(0.9, 0.95)
         )
-        return self
 
     def _lora_target_modules(self) -> List[str]:
         # Unsloth accepts the literal "all-linear" via PEFT >= 0.10.
@@ -184,21 +308,52 @@ class GRPOLLMPolicy:
         `grpo_update(...)` so the trainer can reuse the exact tokenization
         that produced this rollout (no re-tokenization drift).
         """
+        # Serialize: HF/Unsloth generation is not thread-safe under the
+        # async-fanout rollout collector (see __init__).
+        with self._gpu_lock:
+            return self._sample_with_ids_locked(messages)
+
+    def _sample_with_ids_locked(
+        self, messages: List[Dict[str, str]]
+    ) -> Tuple[str, int]:
         try:
             from unsloth import FastLanguageModel  # type: ignore
 
             FastLanguageModel.for_inference(self.model)
-        except ImportError:  # pragma: no cover
-            pass
+        except ImportError:
+            # HF backend / non-Unsloth: just toggle eval mode.
+            try:
+                self.model.eval()
+            except AttributeError:
+                pass
         import torch  # noqa: WPS433
 
         tokenizer = self.tokenizer
-        prompt_ids = tokenizer.apply_chat_template(
+        encoded = tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
-        ).to(self.model.device)
+            return_dict=True,
+        )
+        # transformers 5.x returns BatchEncoding; older versions may return
+        # a plain Tensor when return_dict isn't honored.
+        if hasattr(encoded, "input_ids"):
+            prompt_ids = encoded["input_ids"]
+            attention_mask = encoded.get("attention_mask")
+        else:
+            prompt_ids = encoded
+            attention_mask = None
+        prompt_ids = prompt_ids.to(self.model.device)
+        if attention_mask is None:
+            # Build a trivial all-ones mask. Without this, Qwen (pad==eos)
+            # silently computes wrong position_ids, which crashes the rotary
+            # embedding gather with an index-out-of-bounds assert.
+            import torch as _torch  # noqa: WPS433
+
+            attention_mask = _torch.ones_like(prompt_ids)
+        else:
+            attention_mask = attention_mask.to(self.model.device)
 
         gen_kwargs: Dict[str, Any] = {
             "max_new_tokens": self.config.max_new_tokens,
@@ -206,9 +361,28 @@ class GRPOLLMPolicy:
             "temperature": max(self.config.temperature, 1e-5),
             "top_p": self.config.top_p,
             "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
+            "attention_mask": attention_mask,
+            # Re-normalize after temperature / top_p warpers so any inf/-inf
+            # leaking from bf16 lm_head doesn't poison the multinomial draw.
+            "renormalize_logits": True,
         }
-        with torch.no_grad():
-            out = self.model.generate(prompt_ids, **gen_kwargs)
+        try:
+            with torch.no_grad():
+                out = self.model.generate(prompt_ids, **gen_kwargs)
+        except RuntimeError as exc:
+            # `probability tensor contains either inf, nan or element < 0` — fall
+            # back to greedy decoding for this one sample so a single bad prompt
+            # cannot kill a multi-hour training run.
+            msg = str(exc).lower()
+            if ("inf" in msg or "nan" in msg) and "probability" in msg:
+                fallback = dict(gen_kwargs)
+                fallback.update(
+                    {"do_sample": False, "temperature": 1.0, "top_p": 1.0}
+                )
+                with torch.no_grad():
+                    out = self.model.generate(prompt_ids, **fallback)
+            else:
+                raise
         completion_ids = out[0, prompt_ids.shape[-1]:]
         text = tokenizer.decode(completion_ids, skip_special_tokens=True)
 
@@ -269,7 +443,12 @@ class GRPOLLMPolicy:
         if completion.numel() == 0:
             return torch.zeros((), device=device)
         full = torch.cat([prompt, completion], dim=1)
-        out = model(input_ids=full)
+        # Explicit attention mask. Without it, Qwen2 (pad==eos) silently
+        # computes wrong position_ids and the rotary embedding gather throws
+        # `index out of bounds` on CUDA. `use_cache=False` skips KV-cache
+        # allocation — we don't need it for a single forward pass.
+        attn_mask = torch.ones_like(full)
+        out = model(input_ids=full, attention_mask=attn_mask, use_cache=False)
         logits = out.logits  # (1, T, V)
         # Predict tokens at positions [prompt_len .. prompt_len+comp_len-1];
         # the logit that predicts position i is at index i-1.
@@ -334,26 +513,59 @@ class GRPOLLMPolicy:
         self._optimizer.zero_grad(set_to_none=True)
 
         device = self._model.device
-        adv_tensor = torch.tensor(
-            list(advantages), device=device, dtype=torch.float32
-        )
+        n_total = len(handles)
+        chunk = int(self.config.grpo_micro_batch_size or 0)
+        if chunk <= 0:
+            chunk = n_total
 
-        per_sample_pg: List[Any] = []
-        per_sample_kl: List[Any] = []
-        for h in handles:
-            cur_logp = self.compute_logprobs(h)
-            kl = self.compute_kl_to_ref(h) if self.config.kl_beta > 0 else torch.zeros((), device=device)
-            per_sample_pg.append(cur_logp)
-            per_sample_kl.append(kl)
+        sum_loss = 0.0
+        sum_policy_loss = 0.0
+        sum_kl = 0.0
+        sum_logp = 0.0
 
-        logp_stack = torch.stack(per_sample_pg).to(torch.float32)
-        kl_stack = torch.stack(per_sample_kl).to(torch.float32)
+        # Accumulate gradients across micro-batches; only one optimizer.step()
+        # at the end so this is mathematically a mean over all handles.
+        for start in range(0, n_total, chunk):
+            end = min(start + chunk, n_total)
+            chunk_handles = list(handles[start:end])
+            chunk_advs = list(advantages[start:end])
+            adv_tensor = torch.tensor(chunk_advs, device=device, dtype=torch.float32)
 
-        policy_loss = -(adv_tensor * logp_stack).mean()
-        kl_loss = kl_stack.mean()
-        loss = policy_loss + self.config.kl_beta * kl_loss
+            per_sample_pg: List[Any] = []
+            per_sample_kl: List[Any] = []
+            for h in chunk_handles:
+                cur_logp = self.compute_logprobs(h)
+                if self.config.kl_beta > 0 and self._ref_model is not None:
+                    prompt_ids, completion_ids = self._sample_cache[h]
+                    with torch.no_grad():
+                        ref_logp = self._completion_logprobs(
+                            self._ref_model, prompt_ids, completion_ids
+                        )
+                    kl = cur_logp - ref_logp
+                else:
+                    kl = torch.zeros((), device=device)
+                per_sample_pg.append(cur_logp)
+                per_sample_kl.append(kl)
 
-        loss.backward()
+            logp_stack = torch.stack(per_sample_pg).to(torch.float32)
+            kl_stack = torch.stack(per_sample_kl).to(torch.float32)
+
+            # Scale so the sum of micro-batch losses equals mean over all handles.
+            scale = float(end - start) / float(n_total)
+            policy_loss = -(adv_tensor * logp_stack).mean() * scale
+            kl_loss = kl_stack.mean() * scale
+            loss = policy_loss + self.config.kl_beta * kl_loss
+
+            loss.backward()
+
+            sum_loss += float(loss.detach().item())
+            sum_policy_loss += float(policy_loss.detach().item())
+            sum_kl += float(kl_loss.detach().item())
+            sum_logp += float(logp_stack.sum().detach().item())
+
+            # Free graph + cached tensors for this chunk before the next one.
+            del per_sample_pg, per_sample_kl, logp_stack, kl_stack, loss
+
         if self.config.grad_clip and self.config.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self._model.parameters() if p.requires_grad],
@@ -362,12 +574,14 @@ class GRPOLLMPolicy:
         self._optimizer.step()
         self.release_handles(handles)
 
+        # Un-scale the reported losses (they're sums of scaled micro-batch
+        # values, which equals the true mean over all handles).
         return {
-            "loss": float(loss.detach().item()),
-            "policy_loss": float(policy_loss.detach().item()),
-            "kl": float(kl_loss.detach().item()),
-            "mean_logprob": float(logp_stack.mean().detach().item()),
-            "n": float(len(handles)),
+            "loss": sum_loss,
+            "policy_loss": sum_policy_loss,
+            "kl": sum_kl,
+            "mean_logprob": sum_logp / max(1, n_total),
+            "n": float(n_total),
         }
 
     # ------------------------------------------------------------ save ----

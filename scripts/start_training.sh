@@ -26,6 +26,18 @@ ENV_VERSION="${LEAD_ENV_VERSION:-v2}"
 NO_WANDB="${NO_WANDB:-}"
 CONFIG="${CONFIG:-configs/training.yaml}"
 LOG_DIR="${LOG_DIR:-outputs/logs}"
+# Backend / device / model overrides — empty means "use YAML default".
+BACKEND="${BACKEND:-}"          # auto | unsloth | hf
+DEVICE="${DEVICE:-}"            # auto | cuda | mps | cpu
+MODEL="${MODEL:-}"              # e.g. Qwen/Qwen2.5-0.5B-Instruct on Mac
+
+# Mac convenience: when running natively on Apple Silicon, pick the small
+# model + HF backend + MPS device automatically (override with explicit env).
+if [[ "$(uname -s)-$(uname -m)" == "Darwin-arm64" && "${POLICY}" == "llm" ]]; then
+  : "${BACKEND:=hf}"
+  : "${DEVICE:=mps}"
+  : "${MODEL:=Qwen/Qwen2.5-0.5B-Instruct}"
+fi
 
 mkdir -p "$LOG_DIR" outputs/adapters
 
@@ -62,11 +74,17 @@ if [[ -n "${NO_WANDB}" ]]; then
   WANDB_FLAG="--no-wandb"
 fi
 
-echo "[start] launching trainer (policy=${POLICY}, steps=${STEPS})"
+EXTRA_FLAGS=()
+[[ -n "${BACKEND}" ]] && EXTRA_FLAGS+=(--backend "${BACKEND}")
+[[ -n "${DEVICE}"  ]] && EXTRA_FLAGS+=(--device "${DEVICE}")
+[[ -n "${MODEL}"   ]] && EXTRA_FLAGS+=(--model "${MODEL}")
+
+echo "[start] launching trainer (policy=${POLICY}, steps=${STEPS}, backend=${BACKEND:-yaml}, device=${DEVICE:-yaml}, model=${MODEL:-yaml})"
 ${PY} train.py \
   --config "${CONFIG}" \
   --policy "${POLICY}" \
   --steps "${STEPS}" \
   --env-base-url "http://${ENV_HOST}:${ENV_PORT}" \
   ${WANDB_FLAG} \
+  "${EXTRA_FLAGS[@]}" \
   2>&1 | tee "${TRAIN_LOG}"

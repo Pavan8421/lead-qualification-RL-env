@@ -1,0 +1,5 @@
+name: lead_triage_env
+version: "0.2.0"
+description: >
+  Stylized sales lead triage simulator for RL (CALL / EMAIL / FOLLOW_UP / IGNORE).
+  Phase 2: tiered latent quality, stochastic transitions, shaped rewards, graders.

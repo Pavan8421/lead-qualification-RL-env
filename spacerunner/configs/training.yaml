@@ -1,0 +1,106 @@
+# Lead-triage RL training config
+#
+# M0 — Locked decisions (roadmap §M0). This file is a placeholder created at M0
+# so the choices below are version-controlled before any training code lands.
+# It will be filled out fully at M6 (trainer scaffolding) with lr, episodes/epoch,
+# tier mix schedule, eval cadence, etc.
+#
+# DO NOT change values in the `m0_decisions` block without re-reading roadmap §M0.
+
+m0_decisions:
+  # Policy model. Instruct-tuned so JSON/structured action emission works zero-shot.
+  # Small enough for Unsloth 4-bit + LoRA on a single 16–24 GB GPU.
+  model:
+    primary: "Qwen/Qwen2.5-1.5B-Instruct"
+    laptop_fallback: "Qwen/Qwen2.5-0.5B-Instruct"
+    load_in_4bit: true
+    dtype: "bfloat16"
+
+  # Algorithm. GRPO via TRL — no value model, group-baseline advantages,
+  # well-suited to short stochastic episodes (max_steps=4).
+  algorithm:
+    name: "grpo"
+    framework: "trl"          # trl>=0.11
+    num_generations: 16       # G; A100 80GB easily fits this
+    kl_beta: 0.20             # raised from 0.05: run 19 drifted to kl≈5–7 with no reward gain after step 50
+
+  # Efficiency layer. Unsloth patches HF model w/ Triton kernels; PEFT LoRA on top.
+  efficiency:
+    backend: "unsloth"
+    peft: "lora"
+    lora_rank: 16
+    lora_alpha: 32
+    lora_target: "all-linear"
+
+  # Logging. Required for per-reward column monitoring + KL + action diversity (§15).
+  logging:
+    backend: "wandb"
+    project: "lead-triage-rl"
+
+  # SFT warm-start. Decision: NO. Start RL on the instruct base.
+  # Revisit only if zero-reward rate stays > 70% after M7.
+  sft_warmstart:
+    enabled: false
+    revisit_if_zero_reward_rate_gt: 0.70
+
+  # Rollout transport. Keep current OpenEnv async HTTP client.
+  # One env server, N async workers via asyncio.gather (scaled in M9).
+  rollouts:
+    transport: "openenv-http-async"
+    env_workers: 1            # raised in M9
+
+  # Seed plan. Disjoint ranges per tier, train ∩ eval = ∅.
+  seeds:
+    train_range: [0, 10000]
+    eval_range:  [9000, 9100]   # NOTE: roadmap reserves 9000–9099 per tier; widen if needed
+    per_tier: true
+
+# ---------------------------------------------------------------------------
+# M6 — Trainer config (consumed by train.py + LeadTriageGRPOTrainer).
+training:
+  output_dir: "outputs/adapters"
+  seed: 1337
+
+  # GRPO scalar = sum(per_step_rewards) + lambda * terminal_grader.
+  lambda_terminal_grader: 1.0
+
+  # Backend & device. "auto" picks unsloth+CUDA when available, else falls
+  # back to plain HF transformers + PEFT on the best local device
+  # (cuda > mps > cpu). Override via the `backend:`/`device:` keys.
+  backend: "auto"           # "auto" | "unsloth" | "hf"
+  device: "auto"            # "auto" | "cuda" | "mps" | "cpu"
+
+  # Optimizer. Conservative LR + KL anchor: at lr=2e-4 with anchor off the
+  # policy diverged (kl→80, mean_logprob→-14, conv_rate→0).
+  learning_rate: 3.0e-5
+  grad_clip: 0.5
+  use_reference_model: true       # ON: needed to keep updates bounded
+  total_optimizer_steps: 80          # run 19 plateaued by ~step 50; keep horizon short
+  episodes_per_step: 8               # B prompts; total rollouts/step = B*G = 128
+  save_every_steps: 10               # ckpts every 10 steps (also pushed to Hub mid-run)
+  eval_every_steps: 10
+
+  # Tier curriculum. Medium tier appears reward-degenerate (~0.08 ceiling) so
+  # train on easy+hard only; keep medium for eval/inference comparison.
+  # 2:1 oversample of hard — easy is saturated, headroom is on hard.
+  tier_mix: ["easy", "hard", "hard"]
+
+  # Rollout transport — must match the env server URL.
+  env_concurrency: 32                # bumped from 16 for ~30% faster rollouts
+
+  # W&B (§15).
+  log_to_wandb: true
+
+  # Decoding for the policy LLM during rollout sampling.
+  sampling:
+    max_new_tokens: 16     # tokens are short: EMAIL(case_study) etc.
+    temperature: 0.7       # >0 so GRPO group has within-group variance
+    top_p: 0.9
+
+# M7 — Anti-hack audit thresholds (consumed by scripts/inspect_rollouts.py).
+audit:
+  invalid_follow_up_rate_max: 0.02   # fail if invalid rate > 2%
+  single_action_share_max: 0.85      # fail if any one action > 85% on easy
+  kl_to_base_max: 10.0               # fail if KL drifts above this
+  action_entropy_min_nats: 1.5       # fail if action entropy < 1.5 over 12 actions
+  rule_baseline_grader_easy: 0.45    # trained must strictly beat this on easy

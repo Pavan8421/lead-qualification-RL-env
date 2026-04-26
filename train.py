@@ -57,6 +57,8 @@ def _build_policy_config(raw: Dict[str, Any]) -> PolicyConfig:
         kl_beta=float(algo.get("kl_beta", 0.04)),
         grad_clip=float(training.get("grad_clip", 1.0)),
         use_reference_model=bool(training.get("use_reference_model", True)),
+        backend=str(training.get("backend", "auto")),
+        device=str(training.get("device", "auto")),
     )
 
 
@@ -125,6 +127,23 @@ async def _async_main(cli: argparse.Namespace) -> int:
         trainer = LeadTriageGRPOTrainer(grpo_cfg, policy=_StubPolicy())  # type: ignore[arg-type]
     else:
         policy_cfg = _build_policy_config(raw)
+        if cli.model:
+            policy_cfg.model_name = cli.model
+        if cli.backend:
+            policy_cfg.backend = cli.backend
+        if cli.device:
+            policy_cfg.device = cli.device
+        # Auto-disable 4-bit on the HF backend (no bitsandbytes off-CUDA).
+        if policy_cfg.backend in ("hf",) or (
+            policy_cfg.backend == "auto" and cli.backend != "unsloth"
+        ):
+            try:
+                import torch  # noqa: WPS433
+
+                if not torch.cuda.is_available():
+                    policy_cfg.load_in_4bit = False
+            except ImportError:
+                policy_cfg.load_in_4bit = False
         policy = GRPOLLMPolicy(policy_cfg).load()
         trainer = LeadTriageGRPOTrainer(grpo_cfg, policy=policy)
 
@@ -133,11 +152,26 @@ async def _async_main(cli: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        zero_streak = 0
         for step in range(grpo_cfg.total_optimizer_steps):
             metrics = await trainer.step_once(step_index=step)
             print(json.dumps({"step": step, **metrics}), flush=True)
             if run is not None:
                 run.log(metrics, step=step)
+
+            # Watchdog: env-server death produces empty rollouts forever.
+            if int(metrics.get("n_grad_samples", 0)) == 0:
+                zero_streak += 1
+            else:
+                zero_streak = 0
+            if zero_streak >= 2:
+                print(
+                    f"[FATAL] no gradient samples for {zero_streak} steps "
+                    f"in a row. Aborting.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 2
 
             if (step + 1) % grpo_cfg.save_every_steps == 0:
                 ckpt = out_dir / f"step-{step + 1:06d}"
@@ -161,6 +195,22 @@ def main() -> None:
         choices=["llm", "stub"],
         default="llm",
         help="`stub` skips model load — for CPU smoke tests.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Override m0_decisions.model.primary (e.g. Qwen/Qwen2.5-0.5B-Instruct).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "unsloth", "hf"],
+        default=None,
+        help="Force a backend. `hf` skips Unsloth/4-bit (Apple Silicon / CPU).",
+    )
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "mps", "cpu"],
+        default=None,
     )
     parser.add_argument("--env-base-url", default=None)
     parser.add_argument("--no-wandb", action="store_true")
